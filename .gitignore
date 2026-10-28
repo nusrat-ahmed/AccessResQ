@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+accessresq.db
+.pytest_cache/
+.DS_Store
+
+docs/
+submission_assets/
