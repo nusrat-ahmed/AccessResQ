@@ -1,7 +1,12 @@
 services:
   - type: web
-    name: accessresq-community-intelligence
+    name: accessresq
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
+    envVars:
+      - key: ACCESSRESQ_SECRET_KEY
+        generateValue: true
+      - key: ACCESSRESQ_ADMIN_TOKEN
+        generateValue: true

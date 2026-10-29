@@ -1,186 +1,92 @@
-let map;
-let markers = [];
-
-const $ = (id) => document.getElementById(id);
-const statusLabels = {needed: "Needed", in_progress: "In progress", delivered: "Delivered", closed: "Closed"};
-const categoryLabels = {water:"Water", food:"Food", shelter:"Shelter", medical:"Medical", accessibility:"Accessibility", hazard:"Hazard", other:"Other"};
-
-function initMap() {
-  map = L.map("map", {scrollWheelZoom: false}).setView([4.7110, -74.0721], 12);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    maxZoom: 19
-  }).addTo(map);
-}
-
-function markerColor(report) {
-  if (report.verification === "sample") return "#52718b";
-  if (report.status === "delivered") return "#18745d";
-  if (report.status === "in_progress") return "#b87521";
-  return "#bf4c4b";
-}
-
-function addMarkers(reports) {
-  markers.forEach(m => map.removeLayer(m));
-  markers = [];
-  reports.forEach(r => {
-    const color = markerColor(r);
-    const icon = L.divIcon({
-      className: "custom-marker",
-      html: `<div style="width:17px;height:17px;border-radius:50%;background:${color};border:3px solid white;box-shadow:0 1px 8px #18372e55"></div>`,
-      iconSize: [17,17], iconAnchor: [8,8]
-    });
-    const marker = L.marker([r.lat, r.lng], {icon}).addTo(map);
-    const gap = Math.max(0, Number(r.quantity_needed) - Number(r.quantity_delivered));
-    marker.bindPopup(`<div style="font-family:Arial;min-width:190px"><strong>${escapeHtml(r.title)}</strong><p style="margin:6px 0;font-size:12px">${escapeHtml(r.area)} · ${categoryLabels[r.category] || "Other"}</p><p style="margin:6px 0;font-size:12px">Status: <b>${statusLabels[r.status] || r.status}</b><br>Verification: <b>${r.verification === "sample" ? "Demo data" : r.verification}</b><br>Reported unmet quantity: <b>${gap}</b></p><small>${escapeHtml(r.description)}</small></div>`);
-    markers.push(marker);
-  });
-}
-
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-}
-
-function renderTable(reports) {
-  const body = $("reports-body");
-  if (!reports.length) {
-    body.innerHTML = '<tr><td colspan="5">No reports yet. Submit the first report using the form.</td></tr>';
-    return;
+(() => {
+  'use strict';
+  const $ = (s, root=document) => root.querySelector(s);
+  const $$ = (s, root=document) => [...root.querySelectorAll(s)];
+  const state = { reports: [], shelters: [], user: null, maps: {}, requestMarker: null, toastTimer: null, activePage: '' };
+  const titles = {home:'Overview',map:'Flood intelligence',request:'Request help',shelters:'Safe places',guide:'Safety guide',documents:'My documents',account:'Account'};
+  const esc = (v='') => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmtDate = v => { try { return new Intl.DateTimeFormat('en-BD',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}).format(new Date(v)); } catch { return 'Recently'; } };
+  const fmtStatus = v => ({needed:'Needed',in_progress:'In progress',delivered:'Delivered',closed:'Closed',verified:'Verified',pending:'Pending review',rejected:'Rejected',sample:'Demo record'}[v] || v || 'Unknown');
+  const fmtCategory = v => ({water:'Drinking water',food:'Food',shelter:'Shelter',medical:'Medical',evacuation:'Evacuation',hazard:'Hazard',accessibility:'Accessibility',other:'Other'}[v] || v || 'Community report');
+  const toast = (message, type='ok') => { const el=$('#toast'); el.textContent=message; el.className='toast show'+(type==='error'?' error':''); clearTimeout(state.toastTimer); state.toastTimer=setTimeout(()=>el.classList.remove('show'),4200); };
+  async function api(path, options={}) {
+    const headers = new Headers(options.headers || {});
+    if (options.body && !(options.body instanceof FormData) && typeof options.body === 'object') { headers.set('Content-Type','application/json'); options.body=JSON.stringify(options.body); }
+    const res = await fetch(path,{credentials:'same-origin',...options,headers});
+    const type = res.headers.get('content-type') || '';
+    const data = type.includes('application/json') ? await res.json() : await res.text();
+    if (!res.ok) throw new Error(typeof data==='object' ? (data.detail || 'Something went wrong.') : 'Request failed. Please try again.');
+    return data;
   }
-  body.innerHTML = reports.map(r => {
-    const gap = Math.max(0, Number(r.quantity_needed) - Number(r.quantity_delivered));
-    const demo = r.verification === "sample";
-    return `<tr>
-      <td>${escapeHtml(r.title)}<span class="subtext">${demo ? "DEMO DATA · " : ""}${escapeHtml(r.description)}</span></td>
-      <td>${escapeHtml(r.area)}<span class="subtext">${categoryLabels[r.category] || "Other"}</span></td>
-      <td><span class="status status-${r.status}">${statusLabels[r.status] || r.status}</span>
-        <div class="review-controls"><select aria-label="New status" data-status-for="${r.id}">
-          ${Object.entries(statusLabels).map(([value,label]) => `<option value="${value}" ${r.status===value?"selected":""}>${label}</option>`).join("")}
-        </select><select aria-label="Verification status" data-verification-for="${r.id}">
-          <option value="pending" ${r.verification==="pending"?"selected":""}>Pending</option>
-          <option value="verified" ${r.verification==="verified"?"selected":""}>Verified</option>
-          <option value="rejected" ${r.verification==="rejected"?"selected":""}>Rejected</option>
-        </select><button class="review-save" data-save-report="${r.id}" type="button">Save</button></div>
-      </td>
-      <td><span class="verify verify-${r.verification}">${r.verification === "sample" ? "Demo data" : r.verification}</span></td>
-      <td><strong>${gap}</strong><span class="subtext">reported units</span></td>
-    </tr>`;
-  }).join("");
-}
-
-async function loadData() {
-  const [reportsRes, metricsRes] = await Promise.all([fetch("/api/reports"), fetch("/api/metrics")]);
-  if (!reportsRes.ok || !metricsRes.ok) throw new Error("Could not load the dashboard. Please refresh.");
-  const reports = await reportsRes.json();
-  const metrics = await metricsRes.json();
-  $("m-total").textContent = metrics.total_reports;
-  $("m-pending").textContent = metrics.pending_verification;
-  $("m-unmet").textContent = metrics.estimated_unmet_quantity_units.toLocaleString();
-  $("m-verified").textContent = metrics.verified_reports;
-  renderTable(reports);
-  addMarkers(reports);
-}
-
-$("report-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-
-  // Capture the form synchronously. event.currentTarget can be null after await.
-  const reportForm = event.currentTarget;
-  const button = reportForm.querySelector("button[type=submit]");
-  const msg = $("form-message");
-
-  button.disabled = true;
-  button.textContent = "Submitting…";
-  msg.textContent = "";
-  msg.className = "form-message";
-
-  const form = new FormData(reportForm);
-  const payload = {
-    title: form.get("title"),
-    category: form.get("category"),
-    area: form.get("area"),
-    description: form.get("description"),
-    lat: Number(form.get("lat")),
-    lng: Number(form.get("lng")),
-    quantity_needed: Number(form.get("quantity_needed") || 0),
-    quantity_delivered: Number(form.get("quantity_delivered") || 0),
-    people_affected: Number(form.get("people_affected") || 0),
-    source: "Community report"
-  };
-
-  try {
-    const response = await fetch("/api/reports", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(payload)
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      const detail = data.detail;
-      const message = Array.isArray(detail)
-        ? detail.map(item => item.msg).join("; ")
-        : detail;
-      throw new Error(message || "Could not submit report.");
-    }
-
-    reportForm.reset();
-    $("lat").value = "4.711";
-    $("lng").value = "-74.072";
-    msg.textContent = "Report saved. It is marked pending and is not verified yet.";
-
-    await loadData();
-    map.setView([data.lat, data.lng], 13);
-  } catch (error) {
-    msg.textContent = error.message || "Could not submit report.";
-    msg.classList.add("error");
-  } finally {
-    button.disabled = false;
-    button.innerHTML = 'Submit report <span>↗</span>';
+  const markerIcon = (urgency, sample=false) => L.divIcon({className:'custom-map-icon',html:`<span class="map-pin ${esc(urgency||'high')} ${sample?'sample':''}"></span>`,iconSize:[24,24],iconAnchor:[12,12],popupAnchor:[0,-10]});
+  function makeMap(id, center=[24.0,90.2], zoom=7) {
+    if (!window.L || !document.getElementById(id)) return null;
+    if (state.maps[id]) { state.maps[id].invalidateSize(); return state.maps[id]; }
+    const map=L.map(id,{scrollWheelZoom:false,zoomControl:true}).setView(center,zoom);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>'}).addTo(map);
+    state.maps[id]=map; return map;
   }
-});
-
-
-$("reports-body").addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-save-report]");
-  if (!button) return;
-  const id = button.dataset.saveReport;
-  const token = $("admin-token").value.trim();
-  const status = document.querySelector(`[data-status-for="${id}"]`).value;
-  const verification = document.querySelector(`[data-verification-for="${id}"]`).value;
-  const msg = $("admin-message");
-  if (!token) {
-    msg.textContent = "Enter the server-configured admin token first. Admin review may be disabled on this deployment.";
-    msg.className = "form-message error";
-    return;
+  function clearLayer(map) { map.eachLayer(layer=>{if(layer instanceof L.Marker || layer instanceof L.CircleMarker) map.removeLayer(layer);}); }
+  function reportPopup(r) { return `<div class="map-popup-title">${esc(r.title)}</div><div>${esc(r.area)}</div><div class="map-popup-meta">${esc(fmtCategory(r.category))} · ${esc(fmtStatus(r.status))}${r.verification==='sample'?' · DEMO DATA':''}</div><button class="mini-action" style="margin-top:7px" onclick="window.AccessResQ.showReport('${esc(r.public_id)}')">View report</button>`; }
+  function drawReports(mapId, reports, fit=false) {
+    const map=makeMap(mapId); if (!map) return;
+    clearLayer(map);
+    const points=[];
+    reports.forEach(r=>{ if(typeof r.lat!=='number'||typeof r.lng!=='number') return; const marker=L.marker([r.lat,r.lng],{icon:markerIcon(r.urgency,r.verification==='sample')}).addTo(map); marker.bindPopup(reportPopup(r)); points.push([r.lat,r.lng]); });
+    if (fit && points.length) map.fitBounds(points,{padding:[35,35],maxZoom:9});
+    setTimeout(()=>map.invalidateSize(),100);
   }
-  button.disabled = true;
-  button.textContent = "Saving…";
-  try {
-    const response = await fetch(`/api/reports/${id}/status`, {
-      method: "PATCH",
-      headers: {"Content-Type": "application/json", "X-Admin-Token": token},
-      body: JSON.stringify({status, verification})
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || "Could not update report.");
-    msg.textContent = `Report #${id} review status updated.`;
-    msg.className = "form-message";
-    await loadData();
-  } catch (error) {
-    msg.textContent = error.message || "Could not update report.";
-    msg.className = "form-message error";
-  } finally {
-    button.disabled = false;
-    button.textContent = "Save";
+  function reportRow(r, compact=false) {
+    const urgency = r.urgency || 'high';
+    return `<div class="${compact?'recent-item':'directory-item'}" data-report="${esc(r.public_id)}" tabindex="0" role="button" aria-label="View ${esc(r.title)}"><span class="report-symbol ${esc(urgency)}">${urgency==='critical'?'!':r.category==='water'?'≈':r.category==='medical'?'＋':'⌖'}</span><div class="report-copy"><strong>${esc(r.title)}</strong><small>${esc(r.area)} · ${fmtDate(r.created_at)}</small></div><div class="report-meta"><span class="status-pill ${esc(r.status)}">${esc(fmtStatus(r.status))}</span>${r.verification==='sample'?'<span class="status-pill sample">DEMO</span>':''}</div></div>`;
   }
-});
-
-$("refresh-btn").addEventListener("click", async () => {
-  try { await loadData(); } catch (e) { alert(e.message); }
-});
-
-initMap();
-loadData().catch(err => {
-  $("reports-body").innerHTML = `<tr><td colspan="5">${escapeHtml(err.message)}</td></tr>`;
-});
+  function openReport(publicId) {
+    const r=state.reports.find(x=>x.public_id===publicId); if(!r) return;
+    $('#modalTitle').textContent=r.title;
+    $('#modalContent').innerHTML=`<div class="status-detail"><span class="status-pill ${esc(r.status)}">${esc(fmtStatus(r.status))}</span><span class="status-pill ${r.verification==='verified'?'verified':'pending'}">${esc(fmtStatus(r.verification))}</span>${r.verification==='sample'?'<span class="status-pill sample">Illustrative demo</span>':''}</div><div class="detail-grid"><div class="detail-cell"><small>REPORT ID</small><strong>${esc(r.public_id)}</strong></div><div class="detail-cell"><small>URGENCY</small><strong>${esc((r.urgency||'high').toUpperCase())}</strong></div><div class="detail-cell"><small>CATEGORY</small><strong>${esc(fmtCategory(r.category))}</strong></div><div class="detail-cell"><small>PEOPLE AFFECTED</small><strong>${Number(r.people_affected)||0}</strong></div><div class="detail-cell"><small>AREA</small><strong>${esc(r.area)}</strong></div><div class="detail-cell"><small>REPORTED</small><strong>${esc(fmtDate(r.created_at))}</strong></div><div class="detail-cell"><small>CHILDREN</small><strong>${Number(r.children_count)||0}</strong></div><div class="detail-cell"><small>MOBILITY SUPPORT</small><strong>${Number(r.mobility_support)||0}</strong></div></div><div class="detail-description">${esc(r.description)}</div>${r.needs?`<div class="detail-cell"><small>NEEDS</small><strong>${esc(r.needs)}</strong></div>`:''}<p class="map-popup-meta" style="margin-top:14px">Coordinates: ${Number(r.lat).toFixed(4)}, ${Number(r.lng).toFixed(4)}</p>${r.verification==='sample'?'<div class="map-disclaimer" style="margin:14px -27px -27px"><span>ⓘ</span><p>This is illustrative demo data, not a live emergency or confirmed incident.</p></div>':''}`;
+    $('#reportModal').classList.remove('hidden');
+  }
+  window.AccessResQ={showReport:openReport};
+  function navigate() {
+    let route=(location.hash.replace(/^#\/?/,'').split('?')[0]||'home'); if(!titles[route]) route='home';
+    $$('.page').forEach(p=>p.classList.toggle('active',p.id===`page-${route}`));
+    $$('.nav-link').forEach(a=>a.classList.toggle('active',a.dataset.route===route));
+    $('#pageCrumb').textContent=titles[route]; $('#sidebar').classList.remove('open'); state.activePage=route;
+    window.scrollTo({top:0,behavior:'smooth'});
+    setTimeout(()=>{if(route==='home'){if(!state.maps.homeMap)drawReports('homeMap',state.reports);else state.maps.homeMap.invalidateSize();} if(route==='map'){drawReports('fullMap',filteredReports(),true);renderDirectory(filteredReports());}if(route==='request'){initRequestMap();}if(route==='shelters'){renderShelters();}if(route==='documents'){renderDocuments();}if(route==='account'){renderAccount();}},80);
+  }
+  async function loadReports() {
+    try { state.reports=await api('/api/reports'); renderMetrics(); renderRecent(); if(state.activePage==='home')drawReports('homeMap',state.reports); if(state.activePage==='map'){drawReports('fullMap',filteredReports(),true);renderDirectory(filteredReports());} }
+    catch(e){toast(`Could not load reports: ${e.message}`,'error');}
+  }
+  async function loadMetrics() { try {const m=await api('/api/metrics');$('#statTotal').textContent=m.total_reports;$('#statActive').textContent=m.active_reports;$('#statPending').textContent=m.pending_verification;$('#statShelters').textContent=m.verified_shelters; }catch{ ['#statTotal','#statActive','#statPending','#statShelters'].forEach(s=>$(s).textContent='—');} }
+  function renderMetrics(){ if(!state.reports.length){$('#statTotal').textContent='0';$('#statActive').textContent='0';$('#statPending').textContent='0';return;} $('#statTotal').textContent=state.reports.length;$('#statActive').textContent=state.reports.filter(r=>!['closed','delivered'].includes(r.status)).length;$('#statPending').textContent=state.reports.filter(r=>r.verification==='pending').length; }
+  function renderRecent(){const list=$('#recentReports');const reports=[...state.reports].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).slice(0,4);list.innerHTML=reports.length?reports.map(r=>reportRow(r,true)).join(''):'<div class="no-results">No reports yet. Be the first to share a community signal.</div>';bindReportClicks(list);}
+  function filteredReports(){const q=($('#mapSearch')?.value||'').trim().toLowerCase(),cat=$('#categoryFilter')?.value||'',status=$('#statusFilter')?.value||'';return state.reports.filter(r=>(!q||`${r.title} ${r.area} ${r.description}`.toLowerCase().includes(q))&&(!cat||r.category===cat)&&(!status||r.status===status));}
+  function renderDirectory(reports){const el=$('#allReports');if(!el)return;$('#mapCount').textContent=`${reports.length} report${reports.length===1?'':'s'}`;$('#reportDirectorySub').textContent=`${reports.length} matching community submissions`;el.innerHTML=reports.length?reports.map(r=>`<div class="directory-item" data-report="${esc(r.public_id)}" tabindex="0" role="button"><div class="directory-title"><strong>${esc(r.title)}</strong><span class="status-pill ${esc(r.urgency||'high')}">${esc((r.urgency||'high').toUpperCase())}</span></div><div class="directory-area">⌖ ${esc(r.area)}</div><div class="directory-bottom"><span class="status-pill ${esc(r.status)}">${esc(fmtStatus(r.status))}</span><small>${fmtDate(r.created_at)}${r.verification==='sample'?' · DEMO':''}</small></div></div>`).join(''):'<div class="no-results">No reports match these filters.</div>';bindReportClicks(el);}
+  function bindReportClicks(root=document){$$('[data-report]',root).forEach(el=>{el.onclick=()=>openReport(el.dataset.report);el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openReport(el.dataset.report);}};});}
+  function initRequestMap(){const map=makeMap('requestMap',[24.0,90.2],7);if(!map||map._requestClickBound)return;map._requestClickBound=true;map.on('click',e=>setRequestLocation(e.latlng.lat,e.latlng.lng,'Location selected from map.'));}
+  function setRequestLocation(lat,lng,message){$('#reportLat').value=Number(lat).toFixed(6);$('#reportLng').value=Number(lng).toFixed(6);$('#locationMessage').textContent=message||'Location selected.';const map=state.maps.requestMap;if(map){if(state.requestMarker)map.removeLayer(state.requestMarker);state.requestMarker=L.marker([lat,lng]).addTo(map).bindPopup('Selected report location').openPopup();map.setView([lat,lng],Math.max(map.getZoom(),10));}}
+  $('#useLocation').addEventListener('click',()=>{if(!navigator.geolocation){toast('This browser does not support location access.','error');return;}$('#locationMessage').textContent='Requesting location permission…';navigator.geolocation.getCurrentPosition(pos=>setRequestLocation(pos.coords.latitude,pos.coords.longitude,'Your device location was added. Confirm it is correct.'),err=>{const msg=err.code===1?'Location permission was denied. Enter coordinates or tap the map.':'Could not determine location. Enter coordinates or tap the map.';$('#locationMessage').textContent=msg;toast(msg,'error');},{enableHighAccuracy:true,timeout:10000,maximumAge:60000});});
+  $('#requestForm').addEventListener('submit',async e=>{e.preventDefault();const form=e.currentTarget;const data=Object.fromEntries(new FormData(form).entries());['lat','lng','people_affected','children_count','mobility_support'].forEach(k=>data[k]=Number(data[k]||0));const btn=$('#submitReport');btn.disabled=true;btn.textContent='Submitting…';try{const r=await api('/api/reports',{method:'POST',body:data});toast(`Report submitted. Your report ID is ${r.public_id}.`);form.reset();$('#locationMessage').textContent='Or enter coordinates below / tap the map.';if(state.requestMarker&&state.maps.requestMap){state.maps.requestMap.removeLayer(state.requestMarker);state.requestMarker=null;}await loadReports();location.hash='#map';setTimeout(()=>openReport(r.public_id),300);}catch(err){toast(err.message,'error');}finally{btn.disabled=false;btn.innerHTML='Submit community report <span>→</span>';}});
+  $('#mapSearch').addEventListener('input',()=>{const rows=filteredReports();renderDirectory(rows);drawReports('fullMap',rows,true);});$('#categoryFilter').addEventListener('change',()=>{const rows=filteredReports();renderDirectory(rows);drawReports('fullMap',rows,true);});$('#statusFilter').addEventListener('change',()=>{const rows=filteredReports();renderDirectory(rows);drawReports('fullMap',rows,true);});$('#refreshReports').addEventListener('click',async()=>{await loadReports();toast('Report data refreshed.');});
+  async function loadShelters(){try{state.shelters=await api('/api/shelters?verified_only=true');renderShelters();}catch{state.shelters=[];renderShelters();}}
+  function renderShelters(){const list=$('#verifiedShelters');if(!list)return;const shelters=state.shelters.filter(s=>s.verification==='verified');$('#verifiedShelterCount').textContent=`${shelters.length} verified`;if(!shelters.length){list.innerHTML='<div class="empty-state"><span>⌖</span><h3>No verified locations yet</h3><p>There are no verified shelters in this project database. Do not rely on unverified online listings during an emergency.</p></div>';}else{list.innerHTML=shelters.map(s=>`<div class="shelter-item"><span class="shelter-pin">⌖</span><div class="shelter-info"><strong>${esc(s.name)}</strong><p>${esc(s.address)}</p>${s.contact?`<span class="shelter-contact">Contact: ${esc(s.contact)}</span>`:''}<p><span class="status-pill verified">✓ Verified</span> <span class="map-popup-meta">${esc(s.source||'Locally reviewed')}</span></p></div></div>`).join('');}const map=makeMap('shelterMap');if(map){clearLayer(map);shelters.forEach(s=>L.marker([s.lat,s.lng]).addTo(map).bindPopup(`<strong>${esc(s.name)}</strong><br>${esc(s.address)}`));if(shelters.length)map.fitBounds(shelters.map(s=>[s.lat,s.lng]),{padding:[30,30],maxZoom:11});}}
+  async function loadGuide(){try{const data=await api('/api/safety-guide');const icons={before:'⌂',during:'≈',always:'✳'};$('#guideCards').innerHTML=data.items.map(item=>`<article class="guide-card"><span class="guide-card-icon">${icons[item.kind]||'✳'}</span><h3>${esc(item.title)}</h3><p>${esc(item.body)}</p></article>`).join('');}catch(e){toast('Safety guide could not be loaded.','error');}}
+  async function loadMe(){try{const d=await api('/api/me');state.user=d.user||null;renderAccount();renderDocuments();}catch{state.user=null;renderAccount();renderDocuments();}}
+  function initials(name='AccessResQ'){return name.trim().split(/\s+/).slice(0,2).map(s=>s[0]?.toUpperCase()||'').join('')||'AR';}
+  function renderAccount(){const signed=!!state.user;$('#authForms').classList.toggle('hidden',signed);$('#signedInPanel').classList.toggle('hidden',!signed);$('#documentGate').classList.toggle('hidden',signed);$('#documentWorkspace').classList.toggle('hidden',!signed);$('#topUserName').textContent=signed?state.user.name:'Guest mode';$('#topUserLabel').textContent=signed?state.user.email:'Explore the prototype';$('#avatarInitials').textContent=initials(signed?state.user.name:'AccessResQ');if(signed){$('#accountAvatar').textContent=initials(state.user.name);$('#accountName').textContent=state.user.name;$('#accountEmail').textContent=state.user.email;$('#accountDetails').innerHTML=`<p><span>Account email</span><strong>${esc(state.user.email)}</strong></p><p><span>Phone</span><strong>${esc(state.user.phone||'Not provided')}</strong></p><p><span>Documents</span><strong>Private to this account</strong></p>`;loadMyReports();}}
+  $$('.auth-tab').forEach(tab=>tab.addEventListener('click',()=>{const register=tab.dataset.authTab==='register';$$('.auth-tab').forEach(t=>t.classList.toggle('active',t===tab));$('#loginForm').classList.toggle('hidden',register);$('#registerForm').classList.toggle('hidden',!register);}));
+  $('#loginForm').addEventListener('submit',async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());try{await api('/api/auth/login',{method:'POST',body:d});await loadMe();toast('You are signed in.');e.currentTarget.reset();}catch(err){toast(err.message,'error');}});
+  $('#registerForm').addEventListener('submit',async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());try{await api('/api/auth/register',{method:'POST',body:d});await loadMe();toast('Account created successfully.');e.currentTarget.reset();}catch(err){toast(err.message,'error');}});
+  $('#logoutButton').addEventListener('click',async()=>{try{await api('/api/auth/logout',{method:'POST'});state.user=null;renderAccount();renderDocuments();toast('You have signed out.');}catch(e){toast(e.message,'error');}});
+  async function loadMyReports(){if(!state.user)return;try{const rows=await api('/api/reports/mine');$('#myReports').innerHTML=rows.length?`<div class="report-directory">${rows.map(r=>`<div class="directory-item" data-report="${esc(r.public_id)}"><div class="directory-title"><strong>${esc(r.title)}</strong><span class="status-pill ${esc(r.status)}">${esc(fmtStatus(r.status))}</span></div><div class="directory-area">${esc(r.public_id)} · ${esc(r.area)}</div><div class="directory-bottom"><small>${fmtDate(r.created_at)}</small><span class="status-pill ${r.verification==='verified'?'verified':'pending'}">${esc(fmtStatus(r.verification))}</span></div></div>`).join('')}</div>`:'<div class="empty-state small-empty"><p>You have not submitted any reports while signed in.</p></div>';bindReportClicks($('#myReports'));}catch(e){$('#myReports').innerHTML=`<div class="no-results">${esc(e.message)}</div>`;}}
+  $('#documentFile').addEventListener('change',e=>{$('#selectedFileName').textContent=e.target.files[0]?`${e.target.files[0].name} · ${(e.target.files[0].size/1024/1024).toFixed(2)} MB`:'No file selected';});
+  $('#documentForm').addEventListener('submit',async e=>{e.preventDefault();if(!state.user){toast('Sign in to upload documents.','error');location.hash='#account';return;}const file=$('#documentFile').files[0];if(!file){toast('Choose a document first.','error');return;}if(file.size>10*1024*1024){toast('The maximum file size is 10 MB.','error');return;}const fd=new FormData();fd.append('file',file);const btn=$('#uploadDocumentButton');btn.disabled=true;btn.textContent='Uploading…';try{const d=await api('/api/documents',{method:'POST',body:fd});toast(`${d.original_name} uploaded to your private account.`);e.currentTarget.reset();$('#selectedFileName').textContent='No file selected';await renderDocuments();}catch(err){toast(err.message,'error');}finally{btn.disabled=false;btn.innerHTML='Upload securely <span>→</span>';}});
+  function humanSize(bytes){if(bytes<1024)return `${bytes} B`;if(bytes<1024*1024)return `${(bytes/1024).toFixed(1)} KB`;return `${(bytes/1024/1024).toFixed(2)} MB`;}
+  async function renderDocuments(){const list=$('#documentList');if(!list)return;if(!state.user){$('#documentGate').classList.remove('hidden');$('#documentWorkspace').classList.add('hidden');return;}$('#documentGate').classList.add('hidden');$('#documentWorkspace').classList.remove('hidden');try{const docs=await api('/api/documents');$('#documentCount').textContent=`${docs.length} file${docs.length===1?'':'s'} · private to your account`;list.className='document-list';list.innerHTML=docs.length?docs.map(d=>`<div class="document-row"><span class="file-type-icon">${d.mime_type==='application/pdf'?'PDF':'IMG'}</span><div class="document-info"><strong>${esc(d.original_name)}</strong><small>${humanSize(d.size_bytes)} · Uploaded ${fmtDate(d.created_at)}</small></div><div class="document-actions"><button class="mini-action" data-download="${esc(d.public_id)}">↓</button><button class="mini-action delete" data-delete="${esc(d.public_id)}" aria-label="Delete ${esc(d.original_name)}">×</button></div></div>`).join(''):'<div class="empty-state"><span>▤</span><h3>Your vault is ready</h3><p>Uploaded files will appear here. Files are private to your account.</p></div>';$$('[data-download]',list).forEach(b=>b.onclick=()=>{const a=document.createElement('a');a.href=`/api/documents/${encodeURIComponent(b.dataset.download)}/download`;a.download='';document.body.appendChild(a);a.click();a.remove();});$$('[data-delete]',list).forEach(b=>b.onclick=async()=>{if(!confirm('Delete this document permanently?'))return;try{await api(`/api/documents/${encodeURIComponent(b.dataset.delete)}`,{method:'DELETE'});toast('Document deleted.');await renderDocuments();}catch(err){toast(err.message,'error');}});}catch(e){list.innerHTML=`<div class="no-results">${esc(e.message)}</div>`;}}
+  $('#profileButton').addEventListener('click',()=>location.hash='#account');$('#menuToggle').addEventListener('click',()=>$('#sidebar').classList.toggle('open'));$('#dismissNotice').addEventListener('click',()=>{$('.notice-banner').classList.add('hidden');});$('#closeReportModal').addEventListener('click',()=>$('#reportModal').classList.add('hidden'));$('#reportModal').addEventListener('click',e=>{if(e.target.id==='reportModal')$('#reportModal').classList.add('hidden');});document.addEventListener('keydown',e=>{if(e.key==='Escape')$('#reportModal').classList.add('hidden');});
+  window.addEventListener('hashchange',navigate);
+  async function init(){navigate();await Promise.all([loadReports(),loadMetrics(),loadShelters(),loadGuide(),loadMe()]);if(location.hash==='#map'){drawReports('fullMap',filteredReports(),true);renderDirectory(filteredReports());}}
+  init();
+})();
