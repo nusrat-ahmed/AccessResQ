@@ -1,6 +1,12 @@
 # AccessResQ — Community Flood Response Prototype
 
-**Better information. Safer communities.** AccessResQ is a Bangladesh-focused web prototype for community flood-related reporting, location-aware help requests, locally verified safe-place listings, preparedness guidance, and a private account-based document vault.
+**Better information. Safer communities.** 
+**Live Demo:** https://accessresq.onrender.com  
+**API Documentation:** https://accessresq.onrender.com/docs  
+**GitHub Repository:** https://github.com/nusrat-ahmed/AccessResQ
+
+**Project Status:** Working web prototype  
+**Focus:** Community flood reporting, disaster preparedness, and safer access to local information in Bangladesh.
 
 > **Safety and demo notice:** AccessResQ is not an emergency dispatch service, official flood forecast, or rescue coordination system. It does not automatically alert responders. Seed reports are illustrative demo records and must never be treated as live incidents. The safe-place directory intentionally starts empty: a place is not shown as verified until an authorised reviewer verifies it.
 
