@@ -4,8 +4,7 @@ __pycache__/
 venv/
 .env
 accessresq.db
+uploads/*
+!uploads/.gitkeep
 .pytest_cache/
 .DS_Store
-
-docs/
-submission_assets/

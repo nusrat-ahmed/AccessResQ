@@ -1,14 +1,18 @@
-# AccessResQ — Community Flood Response Prototype
+# AccessResQ NET v1.1 — Community Flood Response + Offline SOS Prototype
 
-**Better information. Safer communities.** 
-**Live Demo:** https://accessresq.onrender.com  
-**API Documentation:** https://accessresq.onrender.com/docs  
-**GitHub Repository:** https://github.com/nusrat-ahmed/AccessResQ
-
-**Project Status:** Working web prototype  
-**Focus:** Community flood reporting, disaster preparedness, and safer access to local information in Bangladesh.
+**Better information. Safer communities.** AccessResQ is a Bangladesh-focused web prototype for community flood-related reporting, location-aware help requests, locally verified safe-place listings, preparedness guidance, and a private account-based document vault.
 
 > **Safety and demo notice:** AccessResQ is not an emergency dispatch service, official flood forecast, or rescue coordination system. It does not automatically alert responders. Seed reports are illustrative demo records and must never be treated as live incidents. The safe-place directory intentionally starts empty: a place is not shown as verified until an authorised reviewer verifies it.
+
+## NEW in v1.1 — AccessResQ NET
+
+- **Offline SOS page** (#sos): explicit consent, situation flags, optional GPS, durable IndexedDB queue, retry and online reconciliation. A request saved offline **has not** been received by the server or by a rescuer.
+- **Private SOS endpoint**: `POST /api/sos`, UUID-based retry idempotency, basic validation. SOS contact/location never appear in the public map or public reports API.
+- **Protected Rescue desk** (#rescue): reviewer-token-authenticated SOS listing and manual status updates; shows an **explainable rule-based triage score**, not a validated AI or automatic rescue priority.
+- **Offline-installable shell**: PWA manifest + service worker cache static pages/scripts only. No SOS, account or document API responses are cached by the service worker. Maps and fonts depend on external resources.
+- **Optional receiver bridge**: authenticated `/api/relay/ingest` and `bridge/relay_gateway.py` for newline JSON from a USB/serial device. **Radio firmware, actual ESP32/LoRa link and Bluetooth phone mesh are not included or field-tested.**
+
+See **`ACCESSRESQ_NET_GUIDE_BN.md`** for Bangla step-by-step installation and a hands-on offline test.
 
 ## Features
 
