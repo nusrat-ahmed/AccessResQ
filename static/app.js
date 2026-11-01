@@ -3,7 +3,7 @@
   const $ = (s, root=document) => root.querySelector(s);
   const $$ = (s, root=document) => [...root.querySelectorAll(s)];
   const state = { reports: [], shelters: [], user: null, maps: {}, requestMarker: null, toastTimer: null, activePage: '' };
-  const titles = {home:'Overview',map:'Flood intelligence',request:'Request help',shelters:'Safe places',guide:'Safety guide',documents:'My documents',account:'Account'};
+  const titles = {home:'Overview',map:'Flood intelligence',request:'Request help',sos:'Offline SOS',rescue:'Rescue desk',shelters:'Safe places',guide:'Safety guide',documents:'My documents',account:'Account'};
   const esc = (v='') => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmtDate = v => { try { return new Intl.DateTimeFormat('en-BD',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}).format(new Date(v)); } catch { return 'Recently'; } };
   const fmtStatus = v => ({needed:'Needed',in_progress:'In progress',delivered:'Delivered',closed:'Closed',verified:'Verified',pending:'Pending review',rejected:'Rejected',sample:'Demo record'}[v] || v || 'Unknown');

@@ -1,107 +1,212 @@
-# AccessResQ — Community Flood Response Prototype
+# AccessResQ NET v1.1 — Community Flood Response & Offline SOS Prototype
 
-**Better information. Safer communities.** 
-**Live Demo:** https://accessresq.onrender.com  
-**API Documentation:** https://accessresq.onrender.com/docs  
-**GitHub Repository:** https://github.com/nusrat-ahmed/AccessResQ
+**Better information. Safer communities.**
 
-**Project Status:** Working web prototype  
-**Focus:** Community flood reporting, disaster preparedness, and safer access to local information in Bangladesh.
+AccessResQ is a Bangladesh-focused web application prototype for community flood reporting, location-aware assistance requests, safe-place information, preparedness guidance, and private document management. Version 1.1 adds an **offline SOS queue** and a **protected Rescue Desk** for controlled demonstrations.
 
-> **Safety and demo notice:** AccessResQ is not an emergency dispatch service, official flood forecast, or rescue coordination system. It does not automatically alert responders. Seed reports are illustrative demo records and must never be treated as live incidents. The safe-place directory intentionally starts empty: a place is not shown as verified until an authorised reviewer verifies it.
+## Live Project Links
 
-## Features
+- 🌐 **Live Demo:** [https://accessresq.onrender.com](https://accessresq.onrender.com)
+- 📚 **API Documentation:** [https://accessresq.onrender.com/docs](https://accessresq.onrender.com/docs)
+- 💻 **GitHub Repository:** [https://github.com/nusrat-ahmed/AccessResQ](https://github.com/nusrat-ahmed/AccessResQ)
 
-- Modern responsive dashboard and separate pages for overview, flood intelligence map, request help, safe places, safety guide, documents and account.
-- Interactive Bangladesh map using Leaflet and OpenStreetMap tiles.
-- Community reports with location, category, urgency, affected people, children, mobility support, requested needs, verification state and status tracking.
-- Public report listing omits the submitter's private contact field.
-- Account registration and sign-in with PBKDF2-SHA256 password hashing and signed, HTTP-only session cookies.
-- Private document upload/download/delete for PDF, JPEG, PNG and WEBP files, maximum 10 MB, with account ownership checks and basic file-signature checks.
-- Reviewer-token-protected report status updates and shelter creation/verification API.
-- SQLite storage, health/metrics endpoints, API tests and deployment template.
+> **Safety notice:** This is a research and hackathon prototype, **not** an official flood warning, emergency dispatch, or rescue service. An SOS accepted by the server is **not** automatically delivered to emergency responders. Example reports are clearly marked as demonstration data. In a real emergency, contact the appropriate local emergency services and authorities.
 
-## Quick start (Windows)
+> **Deployment notice:** The public links may still show the previous version until the v1.1 changes are merged into the deployed branch and Render completes a successful deployment.
 
-1. Install Python 3.11 or newer.
-2. Extract this ZIP into a normal folder (not inside a protected Windows system directory).
-3. Double-click `run_windows.bat` or run it from a terminal. It creates a virtual environment, installs requirements and starts the server.
-4. Open `http://127.0.0.1:8000` in your browser.
+## What's New in v1.1
 
-For a repeat start, activate the environment and run `python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000`.
+| Feature | What it does | Current status |
+|---|---|---|
+| Offline SOS (`#sos`) | Saves a consent-based SOS request to the browser's IndexedDB queue when the server cannot be reached | Implemented prototype |
+| Online reconciliation | Retries pending SOS requests when connectivity returns and shows a server-issued receipt on successful acceptance | Implemented prototype |
+| Optional GPS | Includes coordinates only after the browser grants location permission; an area description can be used without GPS | Implemented prototype |
+| Protected Rescue Desk (`#rescue`) | Lets a reviewer with an admin token view submitted SOS records and update their review status | Implemented prototype |
+| Explainable triage | Displays a rule-based score and reasons from reported conditions; **not a trained AI model** | Implemented prototype |
+| PWA app shell | Caches selected static application files for limited offline access | Implemented prototype |
+| Relay gateway API | Accepts authenticated JSON SOS messages through a separate server endpoint; a Python bridge can read line-delimited JSON | Software interface only |
+| Bluetooth / LoRa mesh | Would relay SOS messages between nearby phones or radio devices without an internet connection | **Not implemented** |
 
-## Configuration
+**Important:** An SOS labelled **pending** exists only on the user's device. It has **not** reached the server or a rescuer. After a successful sync, the server confirms receipt, but that still does **not** mean a rescue team was contacted.
 
-Copy `.env.example` to `.env` and set strong unique values before deployment. The app loads a local `.env` file if present; hosting secrets should be configured in the provider dashboard. For local evaluation, the app uses a development-only signing secret if `ACCESSRESQ_SECRET_KEY` is absent. **Never use that fallback in production.**
+## Core Features
 
-Important environment variables:
+- **Community Dashboard:** Overview of reports, action-needed items, pending verification, and verified safe places.
+- **Flood Intelligence Map:** Interactive Bangladesh community-report map using Leaflet and OpenStreetMap. Reports can be filtered by category and status; sample records are identified as demos.
+- **Request Help:** Submit a community report with an area, coordinates, needs, affected people, and urgency. Public report responses exclude the submitter's contact details.
+- **Safe Places:** Display verified listings only; reviewer-controlled APIs can add and verify locations. The verified directory is initially empty.
+- **Safety Guide:** Preparedness and flood-safety information, with reminders to follow official sources.
+- **User Accounts:** Registration and login using PBKDF2-SHA256 password hashing and signed HTTP-only session cookies.
+- **Private Document Vault:** Account-owned PDF, JPEG, PNG, and WEBP uploads, downloads, and deletion, with a 10 MB per-file limit and basic file-signature checks.
+- **Rescue Desk:** Token-protected SOS list, optional reported GPS locations, rule-based triage explanations, and manual status changes (`unreviewed`, `reviewing`, `contacted`, `closed`). These are reviewer-entered statuses, not proof of a real dispatch.
 
-- `ACCESSRESQ_SECRET_KEY`: long, random secret used to sign sessions.
-- `ACCESSRESQ_ADMIN_TOKEN`: separate long, random reviewer token required by reviewer-only APIs.
-- `ACCESSRESQ_DB_PATH`: optional path for SQLite database.
-- `ACCESSRESQ_UPLOAD_DIR`: optional path for uploaded private files.
-- `ENVIRONMENT=production`: prevents account registration when no session secret is configured.
+## Technology Stack
 
-Reviewer API calls use the `X-Admin-Token` header. There is no public reviewer dashboard in this prototype; do not expose the reviewer token in frontend code.
+| Layer | Technology |
+|---|---|
+| Backend | Python, FastAPI, Uvicorn |
+| Frontend | HTML, CSS, JavaScript |
+| Maps | Leaflet, OpenStreetMap tiles |
+| Database | SQLite |
+| Offline storage | Browser IndexedDB and a Service Worker |
+| API testing | Pytest and HTTPX |
+| Deployment | Render web service |
+| Optional receiver bridge | Python CLI (`bridge/relay_gateway.py`); serial support requires `pyserial` |
 
-## API overview
+## Getting Started (Windows)
+
+**Requirements:** Python 3.11+ and Git (if cloning the repository).
+
+1. Clone or download the repository:
+
+   ```powershell
+   git clone https://github.com/nusrat-ahmed/AccessResQ.git
+   cd AccessResQ
+   ```
+
+2. Double-click `run_windows.bat` in File Explorer, or run it in PowerShell:
+
+   ```powershell
+   .\run_windows.bat
+   ```
+
+   The script creates `.venv` if needed, installs dependencies, copies `.env.example` to `.env` if the latter does not exist, and starts the local server.
+
+3. Before using admin-only features, open `.env` and replace its example secret values with **different, randomly generated secrets**. Keep this file private, then restart the server so it loads the new values.
+
+4. Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser.
+
+For a manual repeat start after activating your virtual environment:
+
+```powershell
+python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+## Environment Variables and Security
+
+Create a local `.env` from `.env.example`. **Never commit `.env`, real API tokens, personal documents, or the SQLite database to GitHub.** The included `.gitignore` excludes the usual local secret, database, upload, and virtual-environment paths.
+
+| Variable | Purpose |
+|---|---|
+| `ACCESSRESQ_SECRET_KEY` | Strong random secret for signing user sessions; required for a secure deployment |
+| `ACCESSRESQ_ADMIN_TOKEN` | Separate random credential for reviewer-only APIs and Rescue Desk access |
+| `ACCESSRESQ_RELAY_TOKEN` | Optional separate credential for the receiver/relay ingestion endpoint; needed only when testing that integration |
+| `ACCESSRESQ_DB_PATH` | Optional SQLite database path; use persistent storage when deployed |
+| `ACCESSRESQ_UPLOAD_DIR` | Optional private file storage path; use persistent storage when deployed |
+| `ENVIRONMENT=production` | Disables account registration if the session secret is missing |
+
+To generate a secret locally:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Use a **different generated value for each secret**. Set production environment variables in the Render dashboard, not in source code. Do not use the example placeholders in a public deployment. Reviewer API requests use the `X-Admin-Token` header; relay ingestion uses the `X-Relay-Token` header.
+
+## API Overview
 
 | Method | Endpoint | Purpose | Access |
 |---|---|---|---|
-| GET | `/api/health` | Health check | Public |
-| GET | `/api/metrics` | Aggregate report counts | Public |
-| GET | `/api/reports` | Filterable report list | Public; contact hidden |
-| POST | `/api/reports` | Submit a community report | Public or signed-in |
-| GET | `/api/reports/mine` | Current user's submitted reports | Signed-in |
-| PATCH | `/api/reports/{id}/status` | Change report status and verification | Reviewer token |
-| GET | `/api/shelters?verified_only=true` | Verified safe places only | Public |
-| POST | `/api/shelters` | Add a pending shelter record | Reviewer token |
-| PATCH | `/api/shelters/{id}/verify` | Verify/reject a shelter | Reviewer token |
-| POST | `/api/auth/register` | Create account | Public |
+| GET | `/api/health` | Service health check | Public |
+| GET | `/api/metrics` | Aggregate report metrics | Public |
+| GET | `/api/reports` | Filterable community report list | Public; contact omitted |
+| POST | `/api/reports` | Create a community report | Public or signed-in |
+| GET | `/api/reports/mine` | View the current user's reports | Signed-in |
+| PATCH | `/api/reports/{report_id}/status` | Update report status and verification | Reviewer token |
+| GET | `/api/shelters` | List safe places; optional `verified_only=true` | Public |
+| POST | `/api/shelters` | Add a pending safe-place record | Reviewer token |
+| PATCH | `/api/shelters/{shelter_id}/verify` | Review safe-place verification | Reviewer token |
+| POST | `/api/auth/register` | Create an account | Public |
 | POST | `/api/auth/login` | Sign in | Public |
 | POST | `/api/auth/logout` | Sign out | Public |
-| GET | `/api/me` | Current session | Public |
-| GET/POST | `/api/documents` | List/upload private documents | Signed-in |
-| GET/DELETE | `/api/documents/{public_id}/download` / `/api/documents/{public_id}` | Download/delete own document | Signed-in |
-| GET | `/api/safety-guide` | Preparedness guidance | Public |
+| GET | `/api/me` | Read current session information | Public |
+| GET / POST | `/api/documents` | List or upload private documents | Signed-in |
+| GET | `/api/documents/{public_id}/download` | Download an owned document | Signed-in |
+| DELETE | `/api/documents/{public_id}` | Delete an owned document | Signed-in |
+| GET | `/api/safety-guide` | Read preparedness information | Public |
+| POST | `/api/sos` | Submit a consent-based SOS | Public |
+| GET | `/api/rescue/sos` | List SOS requests and triage details | Reviewer token |
+| PATCH | `/api/rescue/sos/{public_id}` | Update SOS review status | Reviewer token |
+| POST | `/api/relay/ingest` | Ingest a gateway-originated SOS | Relay token |
 
-Interactive OpenAPI docs are available at `/docs` when the server is running.
+Interactive OpenAPI documentation is available at `/docs` while the server is running.
 
-## Run tests
+## Testing the Offline SOS Workflow
 
-```bash
+Use **fictional, non-sensitive test information only**.
+
+1. Open the site while online so the static files and service worker can load.
+2. In your browser's Developer Tools, simulate offline connectivity.
+3. Open **Offline SOS** (`#sos`), complete the form, approve consent, and submit.
+4. Confirm that the request appears in **My device queue** as **pending**. It has **not** been delivered.
+5. Restore connectivity and select **Sync queued SOS now** (or allow the app to retry when the connection returns).
+6. Confirm that the server returns an `SOS-...` receipt; the entry should then leave the pending queue.
+7. Open **Rescue Desk** (`#rescue`) using your configured reviewer token to inspect the test record and change its review status.
+
+Offline browser storage can be cleared or lost with the device. Some external resources, including map tiles and fonts, still require network access. This is **offline device storage and later server sync**, not phone-to-phone offline communication.
+
+## Optional Relay Bridge (Experimental)
+
+The backend exposes an authenticated `POST /api/relay/ingest` endpoint, and the repository includes `bridge/relay_gateway.py` for sending line-delimited JSON from standard input or a compatible serial receiver to the server.
+
+An example local CLI run is:
+
+```powershell
+python bridge/relay_gateway.py --stdin --url http://127.0.0.1:8000
+```
+
+Configure a unique `ACCESSRESQ_RELAY_TOKEN` on the server and supply the matching value as an environment variable to the bridge process (for example, in PowerShell: `$env:ACCESSRESQ_RELAY_TOKEN = "YOUR_TEST_RELAY_SECRET"`). The standalone bridge reads this process environment variable; it does not load `.env` automatically. Serial operation additionally requires `pyserial` and a suitable device. **No physical ESP32/LoRa radio firmware, radio transport security, Bluetooth mesh, or end-to-end field-tested rescue network is included.**
+
+## Run Automated Tests
+
+```powershell
 python -m pip install -r requirements.txt
 python -m pytest -q
 ```
 
-## Deployment and persistence
+The project includes tests for core APIs and new SOS/reviewer/relay behaviors. Passing tests does not establish real-world emergency reliability or security certification.
 
-`render.yaml` describes a basic Render web service. Set a strong `ACCESSRESQ_SECRET_KEY` and a separate `ACCESSRESQ_ADMIN_TOKEN` in the hosting dashboard. **The SQLite database and uploaded files must be stored on a persistent disk/volume** if you expect them to survive redeploys and be available across devices. Configure both `ACCESSRESQ_DB_PATH` and `ACCESSRESQ_UPLOAD_DIR` to paths on that persistent volume. Without persistent storage, files and database records can be lost when the host restarts or redeploys.
+## Deployment on Render
 
-For real user documents, also configure HTTPS, access monitoring, regular encrypted backups, a privacy/retention policy and incident-response procedures. The prototype stores files on server disk; it does not provide end-to-end encryption or a managed cloud object-storage integration.
+The repository includes `render.yaml` with the following service configuration:
 
-## Data sources and limitations
+- Build command: `pip install -r requirements.txt`
+- Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+- Health-check path: `/api/health`
 
-- Map tiles come from OpenStreetMap; an internet connection is needed for tiles.
-- Report pins come from user submissions and explicitly marked illustrative demo records.
-- There is no live government flood-gauge feed, satellite analysis, predictive flood model, rescue dispatch integration, or guaranteed safe-route engine in this release.
-- Verified safe-place listings remain empty until reviewed data is added through the reviewer API.
-- Browser geolocation requires permission and usually a secure context (HTTPS or localhost).
-- Reviewer actions use a shared server-side token rather than individual reviewer accounts and audit identities.
-- SQLite and local disk storage are appropriate for a demonstrator, not a high-availability emergency platform.
+For an existing Render service, confirm that it points to the correct GitHub repository and branch (normally `main`), and that the relevant environment secrets are set in Render. After merging a pull request, confirm that Render completes a successful deployment before expecting the new version at the existing live URL.
 
-## SDG alignment
+**Persistence warning:** By default, local SQLite records and uploaded files may be lost when an ephemeral hosting instance restarts or redeploys. Persistent disk storage (or an appropriately designed managed database and private object storage) is needed for reliable retention. This prototype should not be used for real personal emergency records without appropriate privacy, backup, access control, retention, and operational safeguards.
 
-The project is designed to support discussion of **SDG 11: Sustainable Cities and Communities** and **SDG 13: Climate Action** through community information sharing and preparedness. This is a design contribution, not evidence that the prototype has reduced disaster impact. Pilot outcomes would need to be measured with local partners.
+## Known Limitations and Roadmap
 
-## Suggested live demo flow
+**Current limitations**
 
-1. Open Overview and explain that the sample reports are illustrative.
-2. Open Flood intelligence, filter reports and open a marker's detail modal.
-3. Submit a new report with a Bangladesh location; show its generated report ID and status.
-4. Open Safe places and explain that no shelter is marked verified without review.
-5. Show Safety guide.
-6. Create a demo account, upload a non-sensitive sample PDF/image, refresh the page, then download and delete it.
-7. Finish with the limitations and a plan for official data integration and a supervised community pilot.
+- No official real-time flood forecast, government flood-gauge feed, or satellite-based flood prediction.
+- No automatic emergency notification, ambulance dispatch, or confirmed rescue-team integration.
+- No working Bluetooth/Nearby Connections mesh or deployed LoRa rescue-node network.
+- The triage score is a transparent heuristic, **not** a trained or clinically validated AI system.
+- Pending SOS data is stored locally in the browser and is not end-to-end encrypted.
+- Maps require external tiles; offline map navigation is not implemented.
+- The Rescue Desk currently relies on a shared reviewer token, not individual staff accounts with audit logs.
 
-Use a throwaway demo account and non-sensitive test document during judging.
+**Potential next steps**
+
+1. Build and test a native Android nearby-device relay prototype.
+2. Add ESP32/LoRa sender-receiver firmware and measure delivery rate, range, delay, and power consumption.
+3. Improve reviewer identity, access logging, and secure handling of personal information.
+4. Integrate verified public environmental data with clear source attribution.
+5. Conduct supervised usability and reliability testing with appropriate local partners.
+
+## Sustainable Development Goals
+
+The project's intended areas of relevance include:
+
+- **SDG 11 — Sustainable Cities and Communities:** Community resilience, accessible information, and disaster preparedness.
+- **SDG 13 — Climate Action:** Awareness and response planning for climate-related hazards.
+
+These are project objectives, **not measured claims of disaster impact**.
+
+---
+
+**AccessResQ NET v1.1 is a working educational prototype, not an operational emergency response platform.**

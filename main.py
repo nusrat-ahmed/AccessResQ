@@ -1,13 +1,13 @@
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
-import hashlib, hmac, os, secrets, sqlite3, uuid, mimetypes
+import hashlib, hmac, os, secrets, sqlite3, uuid, mimetypes, time, threading
 
 from fastapi import FastAPI, HTTPException, Header, Request, UploadFile, File, Form, Depends
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from dotenv import load_dotenv
 
@@ -19,6 +19,9 @@ UPLOAD_DIR = Path(os.getenv("ACCESSRESQ_UPLOAD_DIR", str(BASE_DIR / "uploads")))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 SECRET_KEY = os.getenv("ACCESSRESQ_SECRET_KEY", "")
 ADMIN_TOKEN = os.getenv("ACCESSRESQ_ADMIN_TOKEN", "")
+RELAY_TOKEN = os.getenv("ACCESSRESQ_RELAY_TOKEN", "")
+SOS_RATE_LIMIT = {}
+SOS_RATE_LOCK = threading.Lock()
 SESSION_COOKIE = "accessresq_session"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 ALLOWED_MIME = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
@@ -114,6 +117,30 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_reports_verification ON reports(verification);
         CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
+        CREATE TABLE IF NOT EXISTS sos_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            public_id TEXT NOT NULL UNIQUE,
+            client_id TEXT NOT NULL UNIQUE,
+            source TEXT NOT NULL DEFAULT 'web',
+            area TEXT NOT NULL,
+            lat REAL,
+            lng REAL,
+            details TEXT NOT NULL,
+            people_affected INTEGER NOT NULL,
+            children_count INTEGER NOT NULL,
+            mobility_support INTEGER NOT NULL,
+            trapped INTEGER NOT NULL,
+            water_rising INTEGER NOT NULL,
+            medical_need INTEGER NOT NULL,
+            contact TEXT NOT NULL DEFAULT '',
+            triage_score INTEGER NOT NULL,
+            triage_tier TEXT NOT NULL,
+            triage_reasons TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'unreviewed',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_sos_review ON sos_signals(status,triage_score DESC,created_at DESC);
         """)
         # Safe, clearly labelled Bangladesh demo reports to make the demo immediately explorable.
         count = con.execute("SELECT COUNT(*) FROM reports").fetchone()[0]
@@ -133,7 +160,7 @@ async def lifespan(app: FastAPI):
     init_db()
     yield
 
-app = FastAPI(title="AccessResQ", description="Community flood reporting, help requests and private document vault.", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="AccessResQ", description="Community flood reporting, help requests and private document vault.", version="1.1.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -170,6 +197,135 @@ class ReportIn(BaseModel):
     mobility_support: int = Field(default=0, ge=0, le=10000)
     needs: str = Field(default="", max_length=500)
     contact: str = Field(default="", max_length=80)
+
+
+class SOSIn(BaseModel):
+    # UUID identifies the original offline request and makes retries idempotent.
+    client_id: uuid.UUID
+    area: str = Field(min_length=3, max_length=160)
+    lat: Optional[float] = Field(default=None, ge=20.5, le=26.8)
+    lng: Optional[float] = Field(default=None, ge=88.0, le=92.8)
+    details: str = Field(min_length=10, max_length=1000)
+    people_affected: int = Field(default=1, ge=1, le=10000)
+    children_count: int = Field(default=0, ge=0, le=10000)
+    mobility_support: int = Field(default=0, ge=0, le=10000)
+    trapped: bool = False
+    water_rising: bool = False
+    medical_need: bool = False
+    contact: str = Field(default="", max_length=80)
+    consent: bool
+
+    @field_validator("consent")
+    @classmethod
+    def valid_consent(cls, value):
+        if not value:
+            raise ValueError("Consent is required to submit personal emergency details.")
+        return value
+
+    @model_validator(mode="after")
+    def consistent(self):
+        if (self.lat is None) != (self.lng is None):
+            raise ValueError("Both latitude and longitude are required together.")
+        if self.children_count > self.people_affected or self.mobility_support > self.people_affected:
+            raise ValueError("People in each group cannot exceed the total affected.")
+        return self
+
+
+class SOSStatusIn(BaseModel):
+    status: str = Field(pattern="^(unreviewed|reviewing|contacted|closed)$")
+
+
+def reviewer_auth(token: str):
+    if not ADMIN_TOKEN:
+        raise HTTPException(status_code=503, detail="Reviewer access is not configured.")
+    if not hmac.compare_digest(token, ADMIN_TOKEN):
+        raise HTTPException(status_code=401, detail="Reviewer authorization required.")
+
+
+def priority_for_signal(item: SOSIn):
+    # Transparent heuristic, NOT a trained or medically validated AI model.
+    score, reasons = 0, []
+    for active, points, reason in [
+        (item.trapped, 50, "People report being trapped"),
+        (item.water_rising, 25, "Water reported rising"),
+        (item.medical_need, 25, "Medical assistance requested"),
+        (item.mobility_support > 0, 12, "Mobility assistance requested"),
+        (item.children_count > 0, 8, "Children reported affected"),
+        (item.people_affected >= 5, 8, "Five or more people reported"),
+    ]:
+        if active:
+            score += points
+            reasons.append(reason)
+    return min(score, 100), ("critical" if score >= 60 else "high" if score >= 30 else "standard"), reasons or ["Manual review required; no high-risk flags reported"]
+
+
+def create_sos_record(item: SOSIn, source: str):
+    # Always idempotent by client_id. Do not expose private contact/coordinates in public APIs.
+    score, tier, reasons = priority_for_signal(item)
+    stamp = now_iso()
+    with connect() as con:
+        existing = con.execute("SELECT public_id,status,triage_tier FROM sos_signals WHERE client_id=?", (str(item.client_id),)).fetchone()
+        if existing:
+            return {"public_id": existing["public_id"], "status": existing["status"], "triage_tier": existing["triage_tier"], "server_received": True, "duplicate": True}
+        public_id = "SOS-" + secrets.token_hex(5).upper()
+        try:
+            con.execute("""INSERT INTO sos_signals (public_id,client_id,source,area,lat,lng,details,people_affected,children_count,mobility_support,trapped,water_rising,medical_need,contact,triage_score,triage_tier,triage_reasons,status,created_at,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'unreviewed',?,?)""",
+                (public_id,str(item.client_id),source,item.area.strip(),item.lat,item.lng,item.details.strip(),item.people_affected,item.children_count,item.mobility_support,int(item.trapped),int(item.water_rising),int(item.medical_need),item.contact.strip(),score,tier,"; ".join(reasons),stamp,stamp))
+        except sqlite3.IntegrityError:
+            # Parallel retries can race; let the winner be the canonical record.
+            existing = con.execute("SELECT public_id,status,triage_tier FROM sos_signals WHERE client_id=?", (str(item.client_id),)).fetchone()
+            if not existing:
+                raise
+            return {"public_id": existing["public_id"], "status": existing["status"], "triage_tier": existing["triage_tier"], "server_received": True, "duplicate": True}
+    return {"public_id": public_id, "status": "unreviewed", "triage_tier": tier, "server_received": True, "duplicate": False}
+
+
+def rate_limit_sos(request: Request):
+    # Lightweight single-worker abuse protection, not a production distributed rate limiter.
+    ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    with SOS_RATE_LOCK:
+        recent = [v for v in SOS_RATE_LIMIT.get(ip, []) if now - v < 3600]
+        if len(recent) >= 20:
+            raise HTTPException(status_code=429, detail="Too many requests from this connection; try later.")
+        recent.append(now)
+        SOS_RATE_LIMIT[ip] = recent
+
+
+@app.post("/api/sos", status_code=201)
+def submit_sos(item: SOSIn, request: Request):
+    rate_limit_sos(request)
+    return create_sos_record(item, "web")
+
+
+@app.post("/api/relay/ingest", status_code=201)
+def relay_ingest(item: SOSIn, x_relay_token: str = Header(default="")):
+    # Optional authenticated relay bridge. No BLE/LoRa radio stack is included in this server.
+    if not RELAY_TOKEN:
+        raise HTTPException(status_code=503, detail="Relay gateway is not configured.")
+    if not hmac.compare_digest(x_relay_token, RELAY_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid relay token.")
+    return create_sos_record(item, "relay-gateway")
+
+
+@app.get("/api/rescue/sos")
+def reviewer_sos(x_admin_token: str = Header(default=""), limit: int = 100):
+    reviewer_auth(x_admin_token)
+    with connect() as con:
+        rows = con.execute("SELECT * FROM sos_signals ORDER BY CASE WHEN status='closed' THEN 1 ELSE 0 END,triage_score DESC,created_at DESC LIMIT ?", (max(1,min(limit,200)),)).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.patch("/api/rescue/sos/{public_id}")
+def reviewer_update_sos(public_id: str, item: SOSStatusIn, x_admin_token: str = Header(default="")):
+    reviewer_auth(x_admin_token)
+    with connect() as con:
+        changed = con.execute("UPDATE sos_signals SET status=?,updated_at=? WHERE public_id=?", (item.status,now_iso(),public_id))
+        if not changed.rowcount:
+            raise HTTPException(status_code=404,detail="SOS record not found.")
+        row = con.execute("SELECT * FROM sos_signals WHERE public_id=?", (public_id,)).fetchone()
+    return dict(row)
 
 
 class StatusIn(BaseModel):
@@ -218,9 +374,14 @@ def home():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/sw.js", include_in_schema=False)
+def offline_service_worker():
+    return FileResponse(STATIC_DIR / "sw.js", media_type="text/javascript", headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"})
+
+
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "AccessResQ", "version": "1.0.0", "database": "sqlite", "demo_data_is_illustrative": True}
+    return {"status": "ok", "service": "AccessResQ", "version": "1.1.0", "database": "sqlite", "demo_data_is_illustrative": True}
 
 
 @app.get("/api/me")
